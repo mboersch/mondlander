@@ -107,6 +107,18 @@ class Vector(Point):
         v =  self.x * other.x + self.y * other.y + self.z * other.z
         return Number(v)
 
+import tkinter as Tk
+class Canvas:
+    def __init__(self, width, height):
+        self.root = Tk.Tk()
+        self.C = Tk.Canvas(self.root, width=width, height=height)
+        self.C.pack()
+
+    def stop(self):
+        self.root.quit()
+
+    def run(self):
+        self.root.mainloop()
 
 
 class Tests(unittest.TestCase):
@@ -148,7 +160,17 @@ class Tests(unittest.TestCase):
         self.assertEqual(Vector(0,0,-1).dot(Vector(0,0,1)), -1)
 
 
-import tkinter as Tk
+
+import argparse as Ap
+import sys
 
 if __name__ == "__main__":
-    unittest.main()
+    ap = Ap.ArgumentParser("Mondlander")
+    ap.add_argument("--test", "-T", help="Run unit tests", action="store_true")
+    args = ap.parse_args()
+
+    if args.test:
+        unittest.main(argv=[sys.argv[0], "--verbose"])
+    else:
+        c = Canvas(500,300)
+        c.run()
