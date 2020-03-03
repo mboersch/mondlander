@@ -1,6 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import unittest
 import math
+
+def sin(deg):
+    """ degrees (360deg = 2pi rad) """
+    return math.sin(math.radians(deg))
+def cos(deg):
+    return math.cos(math.radians(deg))
+pi = math.pi
 
 def fequal(a: float, b:float) -> bool:
     """ fuzzy equality for float, e is max rounding err"""
@@ -52,7 +59,8 @@ class Number:
             return self.value ** o
 
 class Point:
-    def __init__(self, x,y,z):
+    def __init__(self, x,y,z=0):
+        """ should accept tuple"""
         self.x = Number(x)
         self.y = Number(y)
         self.z = Number(z) 
@@ -70,7 +78,25 @@ class Point:
         y = self.y - other.y
         z = self.z - other.z
         return Point(x,y,z)
-       
+      
+    def __mul__(self, scalar):
+        assert isinstance(scalar, int)\
+                or isinstance(scalar, float) \
+                or isinstance(scalar, Number)
+        x = self.x * scalar
+        y = self.y * scalar
+        z = self.z * scalar
+        return Point(x,y,z)
+
+    def __truediv__(self, scalar):
+        assert isinstance(scalar, int)\
+                or isinstance(scalar, float) \
+                or isinstance(scalar, Number)
+        x = self.x / scalar
+        y = self.y / scalar
+        z = self.z / scalar
+        return Point(x,y,z)
+
     def __eq__(self, other):
         assert isinstance(other, Point)
         return fequal(self.x, other.x) \
@@ -107,6 +133,51 @@ class Vector(Point):
         v =  self.x * other.x + self.y * other.y + self.z * other.z
         return Number(v)
 
+def _mkempty(dim):
+    def n0():
+        for i in range(dim):
+            yield 0
+    return list(n0())
+class Matrix:
+    """ Knock, knock, Neo"""
+
+    def __init__(self, *list_of_rows):
+        """ accepts list of rows, length of rows must be same"""
+        assert len(list_of_rows) > 0
+        dim0 = len(list_of_rows[0])
+        self.rows=[]
+        for row in list_of_rows:
+            assert len(row) == dim0
+            self.rows.append(list(row))
+            
+    def __repr__(self):
+        return f"Matrix({self.rows})"
+
+    def __mul__(self, other):
+        assert isinstance(other, Matrix) or isinstance(other, Vector)
+        if isinstance(other, Vector):
+            """ turn vector into column matrix"""
+            assert len(self.rows) == 3 and len(self.rows[0]) == 3
+            other = Matrix([other.x.value], [other.y.value], [other.z.value])
+
+        maxcol = min(len(self.rows[0]), len(other.rows[0]))
+        res = []
+        for i in range(0, len(self.rows)):
+            cur = _mkempty(len(self.rows[i]))
+            for j in range(0, maxcol):
+                for k in range(0, len(other.rows[j])):
+                    cur[j] += self.rows[i][k] * other.rows[k][j]
+                    print(i,j, self.rows[i][k], other.rows[k][j])
+            res.append(cur)
+        return res
+
+
+
+class RotZ(Matrix):
+    """ Z-axis rotation"""
+    def __init__(self, degrees):
+        pass
+
 import tkinter as Tk
 class Canvas:
     def __init__(self, width, height):
@@ -114,12 +185,73 @@ class Canvas:
         self.C = Tk.Canvas(self.root, width=width, height=height)
         self.C.pack()
 
+    def width(self):
+        return self.width
+
+    def height(self):
+        return self.height
+
     def stop(self):
         self.root.quit()
+
+    def draw_polygon(self, mesh):
+        """ convert list of Points() into polygon on canvas"""
+        xycords = []
+        for node in mesh:
+            xycords.append( (node.x, node.y) )
+        return self.C.create_polygon(xycords, width=1)
+    def delete(self, id_or_name):
+        self.C.delete(id_or_name)
 
     def run(self):
         self.root.mainloop()
 
+# drawn with pen and paper, create_line on canvas:
+#def LANDER = [5,2, 3,6,  5,6, 4,9, 3,9, 6,9, 4,9, 5,6, 10,6, 11,9, 12,9, 9,9,
+#11,9 , 10,6, 12,6, 10,2, 5,2]
+class Lander:
+    LANDER = [(5,2), (3,6), (5,6), (4,9), (3,9), (3,10),  (6,10), (6,9), (5,9),
+        (6,6), (10,6), (11,9), (12,9), (12,10), (9,10), (9,9), (10,9) , (9,6),
+        (12,6), (10,2), (5,2)]
+    def __init__(self, x,y):
+        """ create lander at x/y coords"""
+        self.coords = Point(x,y)
+        self.canvas_id = None
+        self.mesh = []
+        for xy in self.LANDER:
+            self.mesh.append(Point(*xy))
+        #keep deep copy,
+        self.orig_mesh = list(self.mesh)
+
+    def reset(self):
+        self.mesh = list(self.orig_mesh)
+
+    def translate(self, whereto):
+        """ translate position to Vector whereto """
+        mesh=[]
+        for point in self.mesh:
+            mesh.append(point + whereto)
+        self.mesh = mesh
+
+    def rotate(self, degree):
+        """ rotate by degrees, around z axis """
+
+    def scale(self, factor):
+        """ scale by  factor """
+        mesh=[]
+        for point in self.orig_mesh:
+            mesh.append(point * factor)
+        self.mesh = mesh
+
+    def draw(self, canvas):
+        """ draw on canvas"""
+        if self.canvas_id is not None:
+            canvas.delete(self.canvas_id)
+            self.canvas_id = None
+        mesh=[]
+        for point in self.mesh:
+            mesh.append(point + self.coords)
+        self.canvas_id = canvas.draw_polygon(mesh)
 
 class Tests(unittest.TestCase):
     def test_point_add(self):
@@ -158,8 +290,33 @@ class Tests(unittest.TestCase):
         # directions
         self.assertEqual(Vector(0,0,1).dot(Vector(0,0,1)), 1)
         self.assertEqual(Vector(0,0,-1).dot(Vector(0,0,1)), -1)
+    def test_matrix(self):
+        with self.assertRaises(AssertionError):
+            m = Matrix([1,2,3],[1,2])
+
+        m = Matrix([1,0,0], [0,1,0], [0,0,1])
+        self.assertEqual(m.rows, [[1,0,0],[0,1,0],[0,0,1]])
+
+    def test_matrix_mul(self):
+        v = Vector(1,1,1)
+        m = Matrix([1,2,3],[3,4,5],[5,6,7])
+        mv = m * v
+        print(mv)
 
 
+def drawLanderTest():
+    c = Canvas(500,300)
+    l = Lander(250,150)
+    def scale_animation(i, up):
+        if i > 8:
+            up = -1
+        elif i < 0.8:
+            up = +1
+        l.scale(i)
+        l.draw(c)
+        c.C.after(33, scale_animation,  i + 0.1 *up, up)
+    scale_animation(1, 1)
+    c.run()
 
 import argparse as Ap
 import sys
@@ -172,5 +329,4 @@ if __name__ == "__main__":
     if args.test:
         unittest.main(argv=[sys.argv[0], "--verbose"])
     else:
-        c = Canvas(500,300)
-        c.run()
+        drawLanderTest()
