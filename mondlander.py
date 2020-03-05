@@ -145,32 +145,55 @@ class Matrix:
         """ accepts list of rows, length of rows must be same"""
         assert len(list_of_rows) > 0
         dim0 = len(list_of_rows[0])
-        self.rows=[]
+        self._rows=[]
         for row in list_of_rows:
             assert len(row) == dim0
-            self.rows.append(list(row))
-            
+            self._rows.append(list(row))
+
+    def cols(self):
+        return len(self._rows[0])
+
+    def rows(self):
+        return len(self._rows)
+
     def __repr__(self):
-        return f"Matrix({self.rows})"
+        return f"Matrix({self._rows})"
 
     def __mul__(self, other):
         assert isinstance(other, Matrix) or isinstance(other, Vector)
         if isinstance(other, Vector):
             """ turn vector into column matrix"""
-            assert len(self.rows) == 3 and len(self.rows[0]) == 3
+            assert self.rows() == 3 and self.cols() == 3
             other = Matrix([other.x.value], [other.y.value], [other.z.value])
-
-        maxcol = min(len(self.rows[0]), len(other.rows[0]))
+        #print(f"{self.rows()}x{self.cols()} * {other.rows()}x{other.cols()}")
         res = []
-        for i in range(0, len(self.rows)):
-            cur = _mkempty(len(self.rows[i]))
-            for j in range(0, maxcol):
-                for k in range(0, len(other.rows[j])):
-                    cur[j] += self.rows[i][k] * other.rows[k][j]
-                    print(i,j, self.rows[i][k], other.rows[k][j])
-            res.append(cur)
-        return res
+        for i in range(0, self.rows()):
+            res.append([])
+            for j in range(0, other.cols()):
+                tmp = 0
+                for k in range(0, other.rows()):
+                    tmp += self._rows[i][k] * other._rows[k][j]
+                res[i].append(tmp)
+        return Matrix(*res)
 
+    def __iter__(self):
+        for r in range(0, self.rows()):
+            for c in range(0, self.cols()):
+                yield (r,c)
+
+    def __getitem__(self, ij):
+        """ indexing by tuples .... """
+        i,j = ij
+        return self._rows[i][j]
+
+    def __eq__(self, other):
+        ok = (self.rows() == other.rows()) and (self.cols() == other.cols())
+        if not ok: 
+            return False
+        for i,j in self:
+            if self[i,j] != other[i,j]:
+                return False
+        return True
 
 
 class RotZ(Matrix):
@@ -291,17 +314,23 @@ class Tests(unittest.TestCase):
         self.assertEqual(Vector(0,0,1).dot(Vector(0,0,1)), 1)
         self.assertEqual(Vector(0,0,-1).dot(Vector(0,0,1)), -1)
     def test_matrix(self):
+
         with self.assertRaises(AssertionError):
             m = Matrix([1,2,3],[1,2])
 
         m = Matrix([1,0,0], [0,1,0], [0,0,1])
-        self.assertEqual(m.rows, [[1,0,0],[0,1,0],[0,0,1]])
+        self.assertEqual(m._rows, [[1,0,0],[0,1,0],[0,0,1]])
+
+        self.assertNotEqual(Matrix([123,456],[123,456]), 
+                Matrix([-1234,234],[1,2]))
 
     def test_matrix_mul(self):
         v = Vector(1,1,1)
         m = Matrix([1,2,3],[3,4,5],[5,6,7])
         mv = m * v
-        print(mv)
+        self.assertEqual(mv, Matrix([6],[12], [18]))
+        self.assertEqual(mv.rows(), 3)
+        self.assertEqual(mv.cols(), 1)
 
 
 def drawLanderTest():
