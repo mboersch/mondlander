@@ -4,9 +4,9 @@ import math
 
 def sin(deg):
     """ degrees (360deg = 2pi rad) """
-    return math.sin(math.radians(deg))
+    return round(math.sin(math.radians(deg)), 15)
 def cos(deg):
-    return math.cos(math.radians(deg))
+    return round(math.cos(math.radians(deg)), 15)
 pi = math.pi
 
 def fequal(a: float, b:float) -> bool:
@@ -14,49 +14,14 @@ def fequal(a: float, b:float) -> bool:
     e = 0.00001
     return  abs(a - b) < e
 
-class Number:
+class Number(float):
     """ uses fequal for comparison"""
     def __init__(self, val):
-        self.value = val
-    def __repr__(self):
-        return f"{self.value:f}"
+        return super().__init__()
 
     def __eq__(self, o):
-        if isinstance(o, Number):
-            return fequal(self.value, o.value)
-        assert type(o) == int or type(o) == float
-        return fequal(self.value, o)
+        return fequal(self, o)
 
-    def __lt__(self, o):
-        if isinstance(o, Number):
-            return self.value < o.value
-        return self.value < o
-    def __sub__(self, o):
-        if isinstance(o, Number):
-            return self.value - o.value
-        else:
-            return self.value - o
-
-    def __add__(self, o):
-        if isinstance(o, Number):
-            return self.value + o.value
-        else:
-            return self.value + o
-    def __mul__(self, o):
-        if isinstance(o, Number):
-            return self.value * o.value
-        else:
-            return self.value * o
-    def __truediv__(self, o):
-        if isinstance(o, Number):
-            return self.value / o.value
-        else:
-            return self.value / o
-    def __pow__(self, o):
-        if isinstance(o, Number):
-            return self.value ** o.value
-        else:
-            return self.value ** o
 
 class Point:
     def __init__(self, x,y,z=0):
@@ -164,7 +129,7 @@ class Matrix:
         if isinstance(other, Vector):
             """ turn vector into column matrix"""
             assert self.rows() == 3 and self.cols() == 3
-            other = Matrix([other.x.value], [other.y.value], [other.z.value])
+            other = Matrix([other.x], [other.y], [other.z])
         #print(f"{self.rows()}x{self.cols()} * {other.rows()}x{other.cols()}")
         res = []
         for i in range(0, self.rows()):
@@ -191,7 +156,7 @@ class Matrix:
         if not ok: 
             return False
         for i,j in self:
-            if self[i,j] != other[i,j]:
+            if not fequal(self[i,j], other[i,j]):
                 return False
         return True
 
@@ -199,7 +164,11 @@ class Matrix:
 class RotZ(Matrix):
     """ Z-axis rotation"""
     def __init__(self, degrees):
-        pass
+        super().__init__( 
+            [cos(degrees), -1*sin(degrees), 0],
+            [sin(degrees), cos(degrees), 0],
+            [0, 0, 1]
+        )
 
 import tkinter as Tk
 class Canvas:
@@ -217,12 +186,15 @@ class Canvas:
     def stop(self):
         self.root.quit()
 
-    def draw_polygon(self, mesh):
-        """ convert list of Points() into polygon on canvas"""
+    def draw_polygon(self, tag, offsetxy,  mesh):
+        """ convert list of Points() into polygon on canvas,
+        starting at offsetxy in the canvas space. """
+        self.delete(tag) #cleanup previous call
         xycords = []
         for node in mesh:
-            xycords.append( (node.x, node.y) )
-        return self.C.create_polygon(xycords, width=1)
+            xycords.append( (node.x + offsetxy.x , node.y + offsetxy.y) )
+        return self.C.create_polygon(xycords, width=1, tag=tag)
+
     def delete(self, id_or_name):
         self.C.delete(id_or_name)
 
@@ -232,6 +204,31 @@ class Canvas:
 # drawn with pen and paper, create_line on canvas:
 #def LANDER = [5,2, 3,6,  5,6, 4,9, 3,9, 6,9, 4,9, 5,6, 10,6, 11,9, 12,9, 9,9,
 #11,9 , 10,6, 12,6, 10,2, 5,2]
+
+
+def scale(orig_mesh,  factor):
+    """ scale by  factor """
+    mesh=[]
+    for point in orig_mesh:
+        mesh.append(point * factor)
+    return mesh
+
+def rotate(orig_mesh, degree):
+    """ rotate by degrees, around z axis """
+    rm = RotZ(degree)
+    mesh=[]
+    for point in orig_mesh:
+        rot = rm * Vector(point.x, point.y, point.z)
+        mesh.append(Point(rot[0,0], rot[1,0], rot[2,0]))
+    return mesh
+
+def translate(orig_mesh, whereto):
+    """ translate position to Vector whereto """
+    mesh=[]
+    for point in mesh:
+        mesh.append(point + whereto)
+    return mesh
+
 class Lander:
     LANDER = [(5,2), (3,6), (5,6), (4,9), (3,9), (3,10),  (6,10), (6,9), (5,9),
         (6,6), (10,6), (11,9), (12,9), (12,10), (9,10), (9,9), (10,9) , (9,6),
@@ -249,32 +246,8 @@ class Lander:
     def reset(self):
         self.mesh = list(self.orig_mesh)
 
-    def translate(self, whereto):
-        """ translate position to Vector whereto """
-        mesh=[]
-        for point in self.mesh:
-            mesh.append(point + whereto)
-        self.mesh = mesh
-
-    def rotate(self, degree):
-        """ rotate by degrees, around z axis """
-
-    def scale(self, factor):
-        """ scale by  factor """
-        mesh=[]
-        for point in self.orig_mesh:
-            mesh.append(point * factor)
-        self.mesh = mesh
-
-    def draw(self, canvas):
-        """ draw on canvas"""
-        if self.canvas_id is not None:
-            canvas.delete(self.canvas_id)
-            self.canvas_id = None
-        mesh=[]
-        for point in self.mesh:
-            mesh.append(point + self.coords)
-        self.canvas_id = canvas.draw_polygon(mesh)
+    def position(self):
+        return self.coords
 
 class Tests(unittest.TestCase):
     def test_point_add(self):
@@ -332,19 +305,31 @@ class Tests(unittest.TestCase):
         self.assertEqual(mv.rows(), 3)
         self.assertEqual(mv.cols(), 1)
 
+    def test_matrix_rotate(self):
+        r90 = RotZ(90)
+        self.assertEqual(r90, Matrix([0, -1, 0],[1,0,0],[0,0,1]))
+        r180 = RotZ(180)
+        self.assertEqual(r180, Matrix([-1, 0, 0],[0,-1,0],[0,0,1]))
+        r270 = RotZ(270)
+        self.assertEqual(r270, Matrix([0, 1, 0],[-1,0,0],[0,0,1]))
+
+        orig = Matrix([1,2,3],[4,5,6],[7,8,9])
+        idem = orig * RotZ(360)
+        self.assertEqual(idem, orig)
 
 def drawLanderTest():
     c = Canvas(500,300)
     l = Lander(250,150)
-    def scale_animation(i, up):
+    def scale_animation(i, up, obj):
         if i > 8:
             up = -1
         elif i < 0.8:
             up = +1
-        l.scale(i)
-        l.draw(c)
-        c.C.after(33, scale_animation,  i + 0.1 *up, up)
-    scale_animation(1, 1)
+        mesh = rotate(scale(obj.mesh, i), 1 + i*10)
+        c.draw_polygon("Lander", l.position(), mesh)
+
+        c.C.after(33, scale_animation,  i + 0.1 *up, up, obj)
+    scale_animation(1, 1, l)
     c.run()
 
 import argparse as Ap
