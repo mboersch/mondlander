@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import unittest
 import math
+import enum
 
 def sin(deg):
     """ degrees (360deg = 2pi rad) """
@@ -169,13 +170,49 @@ class RotZ(Matrix):
             [sin(degrees), cos(degrees), 0],
             [0, 0, 1]
         )
+    
 
 import tkinter as Tk
+
+Action = enum.Enum('Action', 'none left right up down quit')
+class UserInput:
+    def __init__(self, widget):
+        self.W=widget
+        self.W.focus_set() #keyboard 
+        self.W.bind_all('<KeyPress>', self.on_key)
+        self.W.bind_all('<KeyRelease>', self.on_key)
+        self.event = None
+        self.action = Action.none
+
+    def on_key(self, event):
+        if event.type == Tk.EventType.KeyPress:
+            self.event = event #for debugging
+            if event.keysym == "Escape" or event.char == "q":
+                self.action = Action.quit
+            if event.keysym == "space" or event.char == "w" :
+                self.action = Action.up
+            if event.keysym == "Left" or event.char == "a":
+                self.action = Action.left
+            if event.keysym == "Right" or event.char == "d":
+                self.action = Action.right
+            if event.keysym == "Down" or event.char == "s":
+                self.action = Action.down
+        elif event.type == Tk.EventType.KeyRelease:
+            self.event = None
+            self.action = Action.none
+    def __str__(self):
+        return f"UserInput<self.event>"
+
+    def do(self):
+        return self.action
+
 class Canvas:
     def __init__(self, width, height):
         self.root = Tk.Tk()
-        self.C = Tk.Canvas(self.root, width=width, height=height)
+        self.C = Tk.Canvas(self.root, width=width, height=height,
+                highlightthickness=0)
         self.C.pack()
+        self.user_input = UserInput(self.C)
 
     def width(self):
         return self.width
@@ -225,7 +262,7 @@ def rotate(orig_mesh, degree):
 def translate(orig_mesh, whereto):
     """ translate position to Vector whereto """
     mesh=[]
-    for point in mesh:
+    for point in orig_mesh:
         mesh.append(point + whereto)
     return mesh
 
@@ -317,7 +354,8 @@ class Tests(unittest.TestCase):
         idem = orig * RotZ(360)
         self.assertEqual(idem, orig)
 
-def drawLanderTest():
+def animTest():
+    """ scale and rotation """
     c = Canvas(500,300)
     l = Lander(250,150)
     def scale_animation(i, up, obj):
@@ -331,16 +369,53 @@ def drawLanderTest():
         c.C.after(33, scale_animation,  i + 0.1 *up, up, obj)
     scale_animation(1, 1, l)
     c.run()
+def drawLander():
+    """ simulate """
+    g = 1.625 # m/s**2
+    gV = Vector(0, 1 * g, 0)
+    steering = 2 #vectored thrust 
+    thrust = 5
+
+    c = Canvas(500,300)
+    l = Lander(250, 0)
+
+    def run_game(obj, pos):
+        action = c.user_input.do()
+        if action == Action.quit:
+            print("Good Bye!")
+            c.stop()
+            return
+        #gravitation
+        obj = translate(obj, gV ) 
+
+        if action == Action.left:
+            obj = translate(obj, Vector(-1 * steering, 0, 0))
+        elif action == Action.right:
+            obj = translate(obj, Vector(1 * steering, 0, 0))
+        elif action == Action.up:
+            obj = translate(obj, Vector(0, -1*thrust, 0))
+
+        # TODO draw moon surface, landing zone
+        # TODO do collision detection
+        # TODO draw HUD (altimeter, speed)
+        c.draw_polygon("Lander", pos, obj)
+        c.C.after(33, run_game, obj, pos)
+
+    run_game(scale(l.mesh, 5), l.position())
+    c.run()
 
 import argparse as Ap
 import sys
 
 if __name__ == "__main__":
     ap = Ap.ArgumentParser("Mondlander")
-    ap.add_argument("--test", "-T", help="Run unit tests", action="store_true")
+    ap.add_argument("--test",  help="Run unit tests", action="store_true")
+    ap.add_argument("--anim-test", help="Run animation tests", action="store_true")
     args = ap.parse_args()
 
     if args.test:
         unittest.main(argv=[sys.argv[0], "--verbose"])
+    elif args.anim_test:
+        animTest()
     else:
-        drawLanderTest()
+        drawLander()
