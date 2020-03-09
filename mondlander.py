@@ -8,7 +8,6 @@ def sin(deg):
     return round(math.sin(math.radians(deg)), 15)
 def cos(deg):
     return round(math.cos(math.radians(deg)), 15)
-pi = math.pi
 
 def fequal(a: float, b:float) -> bool:
     """ fuzzy equality for float, e is max rounding err"""
@@ -230,10 +229,10 @@ class Canvas:
         self.user_input = UserInput(self.C)
 
     def width(self):
-        return self.width
+        return float(self.C["width"])
 
     def height(self):
-        return self.height
+        return float(self.C["height"])
 
     def stop(self):
         self.root.quit()
@@ -246,6 +245,13 @@ class Canvas:
         for node in mesh:
             xycords.append( (node.x + offsetxy.x , node.y + offsetxy.y) )
         return self.C.create_polygon(xycords, width=1, tag=tag)
+
+    def draw_text(self, tag, offsetxy, color, text):
+        self.delete(tag)
+        text_id = self.C.create_text(offsetxy.x, offsetxy.y,
+                tag=tag, anchor="nw", fill=color, font='Helvetica 18 bold')
+        self.C.itemconfig(text_id, text=text)
+        return text_id
 
     def delete(self, id_or_name):
         self.C.delete(id_or_name)
@@ -340,6 +346,10 @@ class Tests(unittest.TestCase):
         # directions
         self.assertEqual(Vector(0,0,1).dot(Vector(0,0,1)), 1)
         self.assertEqual(Vector(0,0,-1).dot(Vector(0,0,1)), -1)
+
+    def test_vector_comp(self):
+        self.assertTrue( Vector(0,0,0) == Vector(0,0,0))
+        #self.assertTrue( Vector(0,1,0) < Vector(0,2,0))
     def test_matrix(self):
 
         with self.assertRaises(AssertionError):
@@ -391,43 +401,82 @@ def animTest():
         c.C.after(33, scale_animation,  i + 0.1 *up, up, obj)
     scale_animation(1, 1, l)
     c.run()
+    
+def height(obj, canvas):
+    """ 0,0 is top left, height would be canvas.size.
+    find the maximum point in obj, return difference to canva.size
+    """
+    mp = Point(0,0,0)
+    for p in obj:
+        if p.y > mp.y:
+            mp.y = p.y
+    return canvas.height() - mp.y
+
 def drawLander():
     """ simulate """
     g = 1.625 # m/s**2
     gV = Vector(0, 1 * g, 0)
     steering = 2 #vectored thrust 
+    fuel_consumption = 5
     thrust = Vector(0, -5, 0)
 
+    done = False
+
+    terminal_velocity = Vector(0, 3, 0)
+
     c = Canvas(500,300)
-    l = Lander(250, 0)
+    lander = Lander(250, 0)
 
     Hz = 30 # refresh rate of animation
-
-    def run_game(obj, pos, lander):
+    def run_game(obj, pos ):
+        nonlocal done 
         action = c.user_input.do()
         if action & Action.quit:
             c.user_input.print("Good Bye!")
             c.stop()
             return
 
-        if action & Action.left:
-            obj = translate(obj, Vector(-1 * steering, 0, 0))
-        if action & Action.right:
-            obj = translate(obj, Vector(1 * steering, 0, 0))
-        #gravitation and thrust
-        lander.velocity += gV * (1./Hz)
-        if action & Action.up:
-            lander.velocity += thrust * (1./Hz)
+        if not done:
+            if action & Action.left:
+                obj = translate(obj, Vector(-1 * steering, 0, 0))
+                lander.fuel -= fuel_consumption * 1./Hz
+            if action & Action.right:
+                obj = translate(obj, Vector(1 * steering, 0, 0))
+                lander.fuel -= fuel_consumption * 1./Hz
+            #gravitation and thrust
+            lander.velocity += gV * (1./Hz)
+            if action & Action.up:
+                lander.velocity += thrust * (1./Hz)
+                lander.fuel -= fuel_consumption * 1./Hz
 
-        obj = translate(obj, lander.velocity )
+            obj = translate(obj, lander.velocity )
 
-        # TODO draw moon surface, landing zone
-        # TODO do collision detection
-        # TODO draw HUD (altimeter, speed)
-        c.draw_polygon("Lander", pos, obj)
-        c.C.after(Hz, run_game, obj, pos, lander)
+            # TODO draw moon surface, landing zone
 
-    run_game(scale(l.mesh, 5), l.position(), l)
+            # TODO use grid for HUD
+            c.draw_text("ALT", Point(c.width()-128, 10), "orange",
+                    f"ALT {height(obj,c):.1f}")
+            c.draw_text("FUEL", Point(c.width()-128, 40), "orange",
+                    f"FUEL {lander.fuel:.1f}")
+            c.draw_text("m/s", Point(c.width()-128, 70), "orange",
+                    f"m/s {abs(lander.velocity.y):.1f}")
+
+            c.draw_polygon("Lander", pos, obj)
+            # TODO do collision detection
+            h = height(obj, c)
+            if h < 1:
+                def banner(text):
+                    c.user_input.print(text)
+                    c.draw_text("GAMEOVER", Point(c.width()/2-len(text)*2, c.height()/2),
+                            "orange", text)
+                if lander.velocity.y  > terminal_velocity.y:
+                    banner(f"YOU CRASHED!")
+                else:
+                    banner(f"YOU WIN!")
+                done = True
+        c.C.after(Hz, run_game, obj, pos)
+
+    run_game(scale(lander.mesh, 5), lander.position())
     c.run()
 
 import argparse as Ap
