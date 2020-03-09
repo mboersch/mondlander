@@ -174,34 +174,49 @@ class RotZ(Matrix):
 
 import tkinter as Tk
 
-Action = enum.Enum('Action', 'none left right up down quit')
+class Action(enum.IntFlag):
+    none = 0
+    left = 1 << 1
+    right = 1 << 2
+    up =  1 << 3
+    down = 1 << 4
+    quit = 1 << 5
+
 class UserInput:
     def __init__(self, widget):
         self.W=widget
         self.W.focus_set() #keyboard 
-        self.W.bind_all('<KeyPress>', self.on_key)
-        self.W.bind_all('<KeyRelease>', self.on_key)
+        self.W.bind_all('<KeyRelease>', self.on_event)
+        self.W.bind_all('<KeyPress>', self.on_event)
         self.event = None
         self.action = Action.none
 
-    def on_key(self, event):
-        if event.type == Tk.EventType.KeyPress:
-            self.event = event #for debugging
-            if event.keysym == "Escape" or event.char == "q":
-                self.action = Action.quit
-            if event.keysym == "space" or event.char == "w" :
-                self.action = Action.up
-            if event.keysym == "Left" or event.char == "a":
-                self.action = Action.left
-            if event.keysym == "Right" or event.char == "d":
-                self.action = Action.right
-            if event.keysym == "Down" or event.char == "s":
-                self.action = Action.down
-        elif event.type == Tk.EventType.KeyRelease:
-            self.event = None
-            self.action = Action.none
+    def on_event(self, event):
+        def set_action(what):
+            if event.type == Tk.EventType.KeyPress:
+                self.action |= what
+            elif event.type == Tk.EventType.KeyRelease:
+                self.action &= ~what
+            else:
+                raise "unexpected event!"
+
+        if (event.keysym == "Escape") or event.keysym == "q":
+            set_action(Action.quit)
+        if (event.keysym == "space") or event.keysym == "w" :
+            set_action(Action.up)
+        if (event.keysym == "Left") or event.keysym == "a":
+            set_action(Action.left)
+        if (event.keysym == "Right") or event.keysym == "d":
+            set_action(Action.right)
+        if (event.keysym == "Down") or event.keysym == "s":
+            set_action(Action.down)
+
+
+    def print(self, *args):
+        print(*args)
+
     def __str__(self):
-        return f"UserInput<self.event>"
+        return f"UserInput<{self.event}>"
 
     def do(self):
         return self.action
@@ -274,6 +289,8 @@ class Lander:
         """ create lander at x/y coords"""
         self.coords = Point(x,y)
         self.canvas_id = None
+        self.velocity = Vector(0,0,0)
+        self.fuel = Number(100)
         self.mesh = []
         for xy in self.LANDER:
             self.mesh.append(Point(*xy))
@@ -353,6 +370,11 @@ class Tests(unittest.TestCase):
         orig = Matrix([1,2,3],[4,5,6],[7,8,9])
         idem = orig * RotZ(360)
         self.assertEqual(idem, orig)
+    def test_physics(self):
+        #TODO throw something 45degrees, 10m/s. check max height, distance
+        #wolfram says: 254.9cm max height, 10.2 x distnce
+        pass
+
 
 def animTest():
     """ scale and rotation """
@@ -374,34 +396,38 @@ def drawLander():
     g = 1.625 # m/s**2
     gV = Vector(0, 1 * g, 0)
     steering = 2 #vectored thrust 
-    thrust = 5
+    thrust = Vector(0, -5, 0)
 
     c = Canvas(500,300)
     l = Lander(250, 0)
 
-    def run_game(obj, pos):
+    Hz = 30 # refresh rate of animation
+
+    def run_game(obj, pos, lander):
         action = c.user_input.do()
-        if action == Action.quit:
-            print("Good Bye!")
+        if action & Action.quit:
+            c.user_input.print("Good Bye!")
             c.stop()
             return
-        #gravitation
-        obj = translate(obj, gV ) 
 
-        if action == Action.left:
+        if action & Action.left:
             obj = translate(obj, Vector(-1 * steering, 0, 0))
-        elif action == Action.right:
+        if action & Action.right:
             obj = translate(obj, Vector(1 * steering, 0, 0))
-        elif action == Action.up:
-            obj = translate(obj, Vector(0, -1*thrust, 0))
+        #gravitation and thrust
+        lander.velocity += gV * (1./Hz)
+        if action & Action.up:
+            lander.velocity += thrust * (1./Hz)
+
+        obj = translate(obj, lander.velocity )
 
         # TODO draw moon surface, landing zone
         # TODO do collision detection
         # TODO draw HUD (altimeter, speed)
         c.draw_polygon("Lander", pos, obj)
-        c.C.after(33, run_game, obj, pos)
+        c.C.after(Hz, run_game, obj, pos, lander)
 
-    run_game(scale(l.mesh, 5), l.position())
+    run_game(scale(l.mesh, 5), l.position(), l)
     c.run()
 
 import argparse as Ap
