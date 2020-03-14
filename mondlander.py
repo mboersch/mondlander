@@ -161,6 +161,7 @@ class Matrix:
         return True
 
 
+# some 3x3 matrixes:
 class RotZ(Matrix):
     """ Z-axis rotation"""
     def __init__(self, degrees):
@@ -169,7 +170,14 @@ class RotZ(Matrix):
             [sin(degrees), cos(degrees), 0],
             [0, 0, 1]
         )
-    
+   
+class Identity(Matrix):
+    def __init__(self, scale=1):
+        super().__init__(
+            [1 * scale,0,0],
+            [0,1 * scale,0],
+            [0,0,1 * scale]
+        )
 
 import tkinter as Tk
 
@@ -237,13 +245,13 @@ class Canvas:
     def stop(self):
         self.root.quit()
 
-    def draw_polygon(self, tag, offsetxy,  mesh):
+    def draw_polygon(self, tag, mesh):
         """ convert list of Points() into polygon on canvas,
         starting at offsetxy in the canvas space. """
         self.delete(tag) #cleanup previous call
         xycords = []
         for node in mesh:
-            xycords.append( (node.x + offsetxy.x , node.y + offsetxy.y) )
+            xycords.append( (node.x, node.y) )
         return self.C.create_polygon(xycords, width=1, tag=tag)
 
     def draw_text(self, tag, offsetxy, color, text):
@@ -255,6 +263,10 @@ class Canvas:
 
     def delete(self, id_or_name):
         self.C.delete(id_or_name)
+
+    #event loop
+    def after(self, ms_int, *args):
+        self.C.after(ms_int, *args)
 
     def run(self):
         self.root.mainloop()
@@ -300,13 +312,16 @@ class Lander:
         self.mesh = []
         for xy in self.LANDER:
             self.mesh.append(Point(*xy))
-        #keep deep copy,
+        #keep deep copy
         self.orig_mesh = list(self.mesh)
 
     def reset(self):
         self.mesh = list(self.orig_mesh)
 
     def position(self):
+        """ currenty x/y position in canvas space.
+        TODO bounding box would be nice
+        """
         return self.coords
 
 class Tests(unittest.TestCase):
@@ -396,13 +411,14 @@ def animTest():
         elif i < 0.8:
             up = +1
         mesh = rotate(scale(obj.mesh, i), 1 + i*10)
-        c.draw_polygon("Lander", l.position(), mesh)
+        mesh = translate(mesh, l.position())
+        c.draw_polygon("Lander", mesh)
 
         c.C.after(33, scale_animation,  i + 0.1 *up, up, obj)
     scale_animation(1, 1, l)
     c.run()
     
-def height(obj, canvas):
+def altitude(obj, canvas):
     """ 0,0 is top left, height would be canvas.size.
     find the maximum point in obj, return difference to canva.size
     """
@@ -412,72 +428,113 @@ def height(obj, canvas):
             mp.y = p.y
     return canvas.height() - mp.y
 
-def drawLander():
-    """ simulate """
+
+class Game:
+    """ 
+    TODO 
+    - add view matrix, adjust view to viewport
+    """
+    def __step(self):
+        self.userinput()
+        if not self.done:
+            self.step()
+        self.canvas.after(self.refreshrate, self.__step)
+    def __init__(self, width, height, hz=30):
+        self.canvas = Canvas(width, height)
+        self.refreshrate = hz
+        self.delta = 1./ self.refreshrate
+        self.done = False
+        self.entities=set()
+
+    def addEntity(self, entity):
+        """ add something to the main loop"""
+        self.entities.add(entity)
+
+    def run(self):
+        self.setup()
+        self.__step()
+        self.canvas.run()
+
+    #override me:
+    def setup(self):
+        pass
+    def step(self):
+        pass
+    def userinput(self):
+        pass
+
+class MondLander(Game):
+    # config:
     g = 1.625 # m/s**2
     gV = Vector(0, 1 * g, 0)
     steering = 2 #vectored thrust 
     fuel_consumption = 5
     thrust = Vector(0, -5, 0)
-
-    done = False
-
-    terminal_velocity = Vector(0, 3, 0)
-
-    c = Canvas(500,300)
+    fatal_velocity = Vector(0, 1, 0)
+    scale = 5
     lander = Lander(250, 0)
 
-    Hz = 30 # refresh rate of animation
-    def run_game(obj, pos ):
-        nonlocal done 
-        action = c.user_input.do()
+    def setup(self):
+        self.lander.mesh = scale(self.lander.mesh, self.scale)
+        self.lander.mesh = translate(self.lander.mesh, self.lander.position())
+
+    def userinput(self):
+        action = self.canvas.user_input.do()
+
         if action & Action.quit:
-            c.user_input.print("Good Bye!")
-            c.stop()
+            self.canvas.user_input.print("Good Bye!")
+            self.canvas.stop()
+            self.done = True
             return
 
-        if not done:
+        if not self.done:
+            obj = self.lander.mesh
+
             if action & Action.left:
-                obj = translate(obj, Vector(-1 * steering, 0, 0))
-                lander.fuel -= fuel_consumption * 1./Hz
+                obj = translate(obj, Vector(-1 * self.steering, 0, 0))
+                self.lander.fuel -= self.fuel_consumption * self.delta
             if action & Action.right:
-                obj = translate(obj, Vector(1 * steering, 0, 0))
-                lander.fuel -= fuel_consumption * 1./Hz
-            #gravitation and thrust
-            lander.velocity += gV * (1./Hz)
+                obj = translate(obj, Vector(1 * self.steering, 0, 0))
+                self.lander.fuel -= self.fuel_consumption * self.delta
             if action & Action.up:
-                lander.velocity += thrust * (1./Hz)
-                lander.fuel -= fuel_consumption * 1./Hz
+                self.lander.velocity += self.thrust * self.delta
+                self.lander.fuel -= self.fuel_consumption * self.delta
 
-            obj = translate(obj, lander.velocity )
+            self.lander.mesh = obj
 
-            # TODO draw moon surface, landing zone
+    def step(self):
+        """ simulate """
+        obj = self.lander.mesh
+        c = self.canvas
+        #gravitation!1
+        self.lander.velocity += self.gV * self.delta
+        obj = translate(obj, self.lander.velocity )
+        self.lander.mesh = obj
+        
+        # TODO draw moon surface, landing zone
 
-            # TODO use grid for HUD
-            c.draw_text("ALT", Point(c.width()-128, 10), "orange",
-                    f"ALT {height(obj,c):.1f}")
-            c.draw_text("FUEL", Point(c.width()-128, 40), "orange",
-                    f"FUEL {lander.fuel:.1f}")
-            c.draw_text("m/s", Point(c.width()-128, 70), "orange",
-                    f"m/s {abs(lander.velocity.y):.1f}")
+        # TODO use grid for HUD
+        c.draw_text("ALT", Point(c.width()-128, 10), "orange",
+                f"ALT {altitude(obj,c):.1f}")
+        c.draw_text("FUEL", Point(c.width()-128, 40), "orange",
+                f"FUEL {self.lander.fuel:.1f}")
+        c.draw_text("m/s", Point(c.width()-128, 70), "orange",
+                f"m/s {abs(self.lander.velocity.y):.1f}")
 
-            c.draw_polygon("Lander", pos, obj)
-            # TODO do collision detection
-            h = height(obj, c)
-            if h < 1:
-                def banner(text):
-                    c.user_input.print(text)
-                    c.draw_text("GAMEOVER", Point(c.width()/2-len(text)*2, c.height()/2),
-                            "orange", text)
-                if lander.velocity.y  > terminal_velocity.y:
-                    banner(f"YOU CRASHED!")
-                else:
-                    banner(f"YOU WIN!")
-                done = True
-        c.C.after(Hz, run_game, obj, pos)
+        c.draw_polygon("Lander", obj)
 
-    run_game(scale(lander.mesh, 5), lander.position())
-    c.run()
+        # TODO do collision detection canvas borders
+        h = altitude(obj, c)
+        if h < 1:
+            def banner(text):
+                c.user_input.print(text)
+                c.draw_text("GAMEOVER", Point(c.width()/2-len(text)*2, c.height()/2),
+                        "orange", text)
+            if self.lander.velocity.y  > self.fatal_velocity.y:
+                banner(f"YOU CRASHED!")
+            else:
+                banner(f"YOU LANDED!")
+            self.done = True
 
 import argparse as Ap
 import sys
@@ -493,4 +550,4 @@ if __name__ == "__main__":
     elif args.anim_test:
         animTest()
     else:
-        drawLander()
+        MondLander(640, 420).run()
