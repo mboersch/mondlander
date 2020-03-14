@@ -268,7 +268,7 @@ class Canvas:
         self.C.itemconfig(text_id, text=text)
         return text_id
 
-    def draw_oval(self, tag,  vw, xy, color, stipple):
+    def draw_oval(self, tag,  vw, xy, color='red', stipple=0):
         self.delete(tag)
         st=""
         if stipple > 0:
@@ -322,6 +322,24 @@ def translate(orig_mesh, whereto):
     for point in orig_mesh:
         mesh.append(point + whereto)
     return mesh
+
+def center(mesh):
+    minx=2**30
+    miny=2**30
+    maxx=-2**30
+    maxy=-2**30
+    for p in mesh:
+        if p.x < minx:
+            minx = p.x
+        if p.y < miny:
+            miny = p.y
+        if p.x > maxx:
+            maxx = p.x
+        if p.y > maxy:
+            maxy = p.y
+    x = (maxx - minx) / 2
+    y = (maxy - miny) / 2
+    return Point(minx + x, miny + y)
 
 class Lander:
     LANDER = [(5,2), (3,6), (5,6), (4,9), (3,9), (3,10),  (6,10), (6,9), (5,9),
@@ -540,7 +558,7 @@ class Particle:
     def set_position(self, point):
         self.coords = point
 
-    def __init__(self, coords, direction, size=10, number=10, duration=30):
+    def __init__(self, coords, direction, size=10, number=10, duration=0):
         self.size = size
         self.coords = coords
         self.active = True
@@ -548,10 +566,8 @@ class Particle:
         self.direction = direction
         self.particles = []
         self.garbage=[]
+        self.number = number
 
-        for _ in range(number):
-            pi = self.__make()
-            self.particles.append(pi)
 
     def activate(self, duration):
         self.duration = duration
@@ -560,8 +576,13 @@ class Particle:
         return self.duration < 1
 
     def step(self):
+        if self.done(): return
+
+        if len(self.particles) < 1:
+            for _ in range(self.number):
+                pi = self.__make()
+                self.particles.append(pi)
         self.duration -= 1
-        # TODO move particles
         cur = []
         for pi in self.particles:
             if pi.decay <= 0:
@@ -575,11 +596,13 @@ class Particle:
             cur.append(npi)
         self.particles = cur
 
-    def draw(self, canvas):
+    def cleanup(self, canvas):
         for tag in self.garbage:
             canvas.delete(tag)
         self.garbage.clear()
 
+    def draw(self, canvas):
+        if self.done(): return 
         for pi in self.particles:
             r = random.random() * self.wobble + self.size 
             pi.tag = canvas.draw_oval(pi.tag,
@@ -604,7 +627,7 @@ class MondLander(Game):
         self.lander = Lander(250, 0)
         self.lander.mesh = scale(self.lander.mesh, self.scale)
         self.lander.mesh = translate(self.lander.mesh, self.lander.position())
-        self.particle = Particle(Point(250,0),Vector(0,-1,0), duration=0)
+        self.particle = Particle(Point(250,0),Vector(0,1,0))
 
     def userinput(self):
         super().userinput()
@@ -637,11 +660,14 @@ class MondLander(Game):
         self.lander.mesh = obj
        
         # draw rocket exhaust
-        if not self.particle.done():
+        if self.particle.done():
+            self.particle.cleanup(c)
+        else:
             #TODO should be an entity
             # render particles as spheres
-            self.particle.set_position(self.lander.position())
+            self.particle.set_position(center(obj))
             self.particle.step() 
+            self.particle.cleanup(c)
             self.particle.draw(c)
 
         # TODO draw moon surface, landing zone
