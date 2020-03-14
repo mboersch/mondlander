@@ -2,6 +2,7 @@
 import unittest
 import math
 import enum
+import random
 
 def sin(deg):
     """ degrees (360deg = 2pi rad) """
@@ -78,7 +79,7 @@ class Vector(Point):
         return f"Vector({self.x},{self.y},{self.z})"
 
     def __mul__(self, scalar):
-        assert type(scalar) == int or type(scalar) == float
+        assert type(scalar) == int or type(scalar) == float or type(scalar)== Number
         return Vector(self.x*scalar, self.y*scalar, self.z*scalar)
 
     def __div__(self, scalar):
@@ -229,12 +230,18 @@ class UserInput:
         return self.action
 
 class Canvas:
+    #pseudo alpha channel via stipple pattern
+    stipple_patterns = [12,25,50,75]
+
     def __init__(self, width, height):
         self.root = Tk.Tk()
         self.C = Tk.Canvas(self.root, width=width, height=height,
                 highlightthickness=0)
         self.C.pack()
         self.user_input = UserInput(self.C)
+
+    def background(self, color):
+        self.C["background"] = color
 
     def width(self):
         return float(self.C["width"])
@@ -245,14 +252,14 @@ class Canvas:
     def stop(self):
         self.root.quit()
 
-    def draw_polygon(self, tag, mesh):
+    def draw_polygon(self, tag, mesh, color='black'):
         """ convert list of Points() into polygon on canvas,
         starting at offsetxy in the canvas space. """
         self.delete(tag) #cleanup previous call
         xycords = []
         for node in mesh:
             xycords.append( (node.x, node.y) )
-        return self.C.create_polygon(xycords, width=1, tag=tag)
+        return self.C.create_polygon(xycords, width=1, tag=tag, fill=color)
 
     def draw_text(self, tag, offsetxy, color, text):
         self.delete(tag)
@@ -260,6 +267,15 @@ class Canvas:
                 tag=tag, anchor="nw", fill=color, font='Helvetica 18 bold')
         self.C.itemconfig(text_id, text=text)
         return text_id
+
+    def draw_oval(self, tag,  vw, xy, color, stipple):
+        self.delete(tag)
+        st=""
+        if stipple > 0:
+            what = self.stipple_patterns[stipple % len(self.stipple_patterns)]
+            st=f"gray{what}"
+        tag = self.C.create_oval(*vw, *xy, fill=color, stipple=st)
+        return tag 
 
     def delete(self, id_or_name):
         self.C.delete(id_or_name)
@@ -285,11 +301,19 @@ def scale(orig_mesh,  factor):
 
 def rotate(orig_mesh, degree):
     """ rotate by degrees, around z axis """
+    isvector=False
+    if isinstance(orig_mesh, Vector): #XXX hack
+        orig_mesh = [orig_mesh]
+        isvector=True
+
     rm = RotZ(degree)
     mesh=[]
     for point in orig_mesh:
         rot = rm * Vector(point.x, point.y, point.z)
         mesh.append(Point(rot[0,0], rot[1,0], rot[2,0]))
+
+    if isvector:
+        return mesh[0]
     return mesh
 
 def translate(orig_mesh, whereto):
@@ -303,12 +327,13 @@ class Lander:
     LANDER = [(5,2), (3,6), (5,6), (4,9), (3,9), (3,10),  (6,10), (6,9), (5,9),
         (6,6), (10,6), (11,9), (12,9), (12,10), (9,10), (9,9), (10,9) , (9,6),
         (12,6), (10,2), (5,2)]
-    def __init__(self, x,y):
+    def __init__(self, x,y, color='silver'):
         """ create lander at x/y coords"""
         self.coords = Point(x,y)
         self.canvas_id = None
         self.velocity = Vector(0,0,0)
         self.fuel = Number(100)
+        self.color = color
         self.mesh = []
         for xy in self.LANDER:
             self.mesh.append(Point(*xy))
@@ -439,6 +464,8 @@ class Game:
         if not self.done:
             self.step()
         self.canvas.after(self.refreshrate, self.__step)
+        self.canvas.background('black')
+
     def __init__(self, width, height, hz=30):
         self.canvas = Canvas(width, height)
         self.refreshrate = hz
@@ -461,7 +488,107 @@ class Game:
     def step(self):
         pass
     def userinput(self):
-        pass
+        action = self.canvas.user_input.do()
+
+        if action & Action.quit:
+            self.canvas.user_input.print("Good Bye!")
+            self.quit()
+            return
+
+    def quit(self):
+        self.canvas.stop()
+        self.done = True
+
+
+#helper:
+class P:
+    decay = None
+    point = None
+    velocity = None
+    direction = None
+    color = None
+    tag = None
+
+    def __repr__(self):
+        return f"P<{self.point},{self.velocity},"\
+            f"{self.direction},decay={self.decay},{self.color},tag={self.tag}>"
+
+class Particle:
+    """ draw number particles, in direction, for duration steps """
+    decay = 10
+    velocities=[10, 13]
+    colors=['white smoke', 'yellow1', 'wheat1','yellow','orange','lightgrey', 'NavajoWhite']
+    spread = 30 # random deviation in direction
+    wobble=20 #random size changes
+    counter=0
+
+    def __str__(self):
+        return f"Particle<{self.coords}>"
+
+    def __make(self):
+        pi = P()
+        pi.point = Point(self.coords.x, self.coords.y)
+        pi.decay = self.decay
+        pi.tag= f"parti{self.counter:x}"
+        self.counter += 1
+        pi.velocity = \
+            random.randrange(self.velocities[0], self.velocities[1])
+        pi.color = random.choice(self.colors)
+        pi.direction = rotate(self.direction, (360 - self.spread/2) + random.random() * self.spread)
+        return pi
+
+    def set_position(self, point):
+        self.coords = point
+
+    def __init__(self, coords, direction, size=10, number=10, duration=30):
+        self.size = size
+        self.coords = coords
+        self.active = True
+        self.duration = duration
+        self.direction = direction
+        self.particles = []
+        self.garbage=[]
+
+        for _ in range(number):
+            pi = self.__make()
+            self.particles.append(pi)
+
+    def activate(self, duration):
+        self.duration = duration
+
+    def done(self):
+        return self.duration < 1
+
+    def step(self):
+        self.duration -= 1
+        # TODO move particles
+        cur = []
+        for pi in self.particles:
+            if pi.decay <= 0:
+                #new generation
+                self.garbage.append(pi.tag)
+                npi = self.__make()
+            else:
+                npi = pi
+            npi.point = npi.point + (npi.direction * npi.velocity )
+            npi.decay -= 1
+            cur.append(npi)
+        self.particles = cur
+
+    def draw(self, canvas):
+        for tag in self.garbage:
+            canvas.delete(tag)
+        self.garbage.clear()
+
+        for pi in self.particles:
+            r = random.random() * self.wobble + self.size 
+            pi.tag = canvas.draw_oval(pi.tag,
+                    (pi.point.x, pi.point.y),
+                    (pi.point.x + r, pi.point.y + r),
+                    pi.color, pi.decay
+                    )
+
+
 
 class MondLander(Game):
     # config:
@@ -472,20 +599,17 @@ class MondLander(Game):
     thrust = Vector(0, -5, 0)
     fatal_velocity = Vector(0, 1, 0)
     scale = 5
-    lander = Lander(250, 0)
 
     def setup(self):
+        self.lander = Lander(250, 0)
         self.lander.mesh = scale(self.lander.mesh, self.scale)
         self.lander.mesh = translate(self.lander.mesh, self.lander.position())
+        self.particle = Particle(Point(250,0),Vector(0,-1,0), duration=0)
 
     def userinput(self):
-        action = self.canvas.user_input.do()
+        super().userinput()
 
-        if action & Action.quit:
-            self.canvas.user_input.print("Good Bye!")
-            self.canvas.stop()
-            self.done = True
-            return
+        action = self.canvas.user_input.do()
 
         if not self.done:
             obj = self.lander.mesh
@@ -499,6 +623,7 @@ class MondLander(Game):
             if action & Action.up:
                 self.lander.velocity += self.thrust * self.delta
                 self.lander.fuel -= self.fuel_consumption * self.delta
+                self.particle.activate(self.refreshrate)
 
             self.lander.mesh = obj
 
@@ -510,7 +635,15 @@ class MondLander(Game):
         self.lander.velocity += self.gV * self.delta
         obj = translate(obj, self.lander.velocity )
         self.lander.mesh = obj
-        
+       
+        # draw rocket exhaust
+        if not self.particle.done():
+            #TODO should be an entity
+            # render particles as spheres
+            self.particle.set_position(self.lander.position())
+            self.particle.step() 
+            self.particle.draw(c)
+
         # TODO draw moon surface, landing zone
 
         # TODO use grid for HUD
@@ -521,7 +654,7 @@ class MondLander(Game):
         c.draw_text("m/s", Point(c.width()-128, 70), "orange",
                 f"m/s {abs(self.lander.velocity.y):.1f}")
 
-        c.draw_polygon("Lander", obj)
+        c.draw_polygon("Lander", obj, self.lander.color)
 
         # TODO do collision detection canvas borders
         h = altitude(obj, c)
@@ -536,18 +669,33 @@ class MondLander(Game):
                 banner(f"YOU LANDED!")
             self.done = True
 
+class TestParticle(Game):
+    def setup(self):
+        x,y   = self.canvas.width()/2, self.canvas.height()/2
+        self.particle=Particle(Point(x,y), Vector(0,-1,0), 10, 1,
+                duration=5 * self.refreshrate)
+    def step(self):
+        if self.particle.done():
+            self.quit()
+            return
+        self.particle.step()
+        self.particle.draw(self.canvas)
+
 import argparse as Ap
 import sys
 
 if __name__ == "__main__":
     ap = Ap.ArgumentParser("Mondlander")
     ap.add_argument("--test",  help="Run unit tests", action="store_true")
-    ap.add_argument("--anim-test", help="Run animation tests", action="store_true")
+    ap.add_argument("--test-anim", help="Run animation tests", action="store_true")
+    ap.add_argument("--test-particle", help="Run particle tests", action="store_true")
     args = ap.parse_args()
 
     if args.test:
         unittest.main(argv=[sys.argv[0], "--verbose"])
-    elif args.anim_test:
+    elif args.test_anim:
         animTest()
+    elif args.test_particle:
+        TestParticle(400, 300).run()
     else:
-        MondLander(640, 420).run()
+        MondLander(640, 480).run()
