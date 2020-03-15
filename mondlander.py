@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2020  Marius Boerschig
+
 import unittest
 import math
 import enum
@@ -547,7 +549,7 @@ class Particle:
         pi = P()
         pi.point = Point(self.coords.x, self.coords.y)
         pi.decay = self.decay
-        pi.tag= f"parti{self.counter:x}"
+        pi.tag=""
         self.counter += 1
         pi.velocity = \
             random.randrange(self.velocities[0], self.velocities[1])
@@ -563,26 +565,29 @@ class Particle:
         self.coords = coords
         self.active = True
         self.duration = duration
+        self.life = 0
         self.direction = direction
         self.particles = []
         self.garbage=[]
         self.number = number
 
+    def populate(self):
+        for _ in range(self.number):
+            pi = self.__make()
+            self.particles.append(pi)
 
     def activate(self, duration):
         self.duration = duration
+        self.life = 0
 
     def done(self):
-        return self.duration < 1
+        return self.life > self.duration
 
     def step(self):
-        if self.done(): return
+        self.life += 1
 
         if len(self.particles) < 1:
-            for _ in range(self.number):
-                pi = self.__make()
-                self.particles.append(pi)
-        self.duration -= 1
+            self.populate()
         cur = []
         for pi in self.particles:
             if pi.decay <= 0:
@@ -595,6 +600,12 @@ class Particle:
             npi.decay -= 1
             cur.append(npi)
         self.particles = cur
+
+    def reset(self, canvas):
+        self.cleanup(canvas)
+        for pi in self.particles:
+            canvas.delete(pi.tag)
+        self.particles.clear()
 
     def cleanup(self, canvas):
         for tag in self.garbage:
@@ -628,6 +639,8 @@ class MondLander(Game):
         self.lander.mesh = scale(self.lander.mesh, self.scale)
         self.lander.mesh = translate(self.lander.mesh, self.lander.position())
         self.particle = Particle(Point(250,0),Vector(0,1,0))
+        self.particle.spread=20
+        self.particle.size=5
 
     def userinput(self):
         super().userinput()
@@ -646,7 +659,7 @@ class MondLander(Game):
             if action & Action.up:
                 self.lander.velocity += self.thrust * self.delta
                 self.lander.fuel -= self.fuel_consumption * self.delta
-                self.particle.activate(self.refreshrate)
+                self.particle.activate(1)
 
             self.lander.mesh = obj
 
@@ -661,7 +674,7 @@ class MondLander(Game):
        
         # draw rocket exhaust
         if self.particle.done():
-            self.particle.cleanup(c)
+            self.particle.reset(c)
         else:
             #TODO should be an entity
             # render particles as spheres
