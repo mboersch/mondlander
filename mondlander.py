@@ -212,7 +212,7 @@ class UserInput:
 
         if (event.keysym == "Escape") or event.keysym == "q":
             set_action(Action.quit)
-        if (event.keysym == "space") or event.keysym == "w" :
+        if (event.keysym == "space") or event.keysym == "w" or event.keysym == "Up" :
             set_action(Action.up)
         if (event.keysym == "Left") or event.keysym == "a":
             set_action(Action.left)
@@ -464,15 +464,61 @@ def animTest():
     c.run()
     
 def altitude(obj, canvas):
-    """ 0,0 is top left, height would be canvas.size.
-    find the maximum point in obj, return difference to canva.size
+    """ 0,0 is top left, height would be canvas.size, or negative if outside.
     """
     mp = Point(0,0,0)
     for p in obj:
-        if p.y > mp.y:
+        if abs(p.y) > mp.y:
             mp.y = p.y
     return canvas.height() - mp.y
 
+def width(obj):
+    """ x dimensions of polygon """
+    x0, x1 = 0, 0
+    for p in obj:
+        if x0 <= p.x:
+            x0 = p.x
+        if p.x > x1:
+            x1 = p.x
+    return abs(x1 - x0)
+
+def drawSurface(width, height, landing_site_width):
+    """
+    create jagged surface as polygon with random points.
+    Make a flat landing site of landing_site width
+    return polygon of background and tuple of points for landing site
+    """
+    assert landing_site_width <= width
+    h_range = [0,30]
+    p_num = 256 #jagginess, number of points
+    smooth  = int(math.log(p_num))
+    p = []
+
+
+    #TODO add randomly placed landing_site_width flat surface, return coords
+    step = width / p_num if p_num > 0 else 0
+
+    def randh():
+        return height - random.randrange(h_range[0], h_range[1])
+
+    def randw():
+        return int(step * random.random())
+
+    def skip(i):
+        return True if (i % smooth != 0) else False
+
+    p1 = Point(0, height)
+    p.append(p1)
+
+    for i in range(1,p_num-2):
+        if skip(i): continue
+        pi = Point(i*step - randw(), randh())
+        p.append(pi)
+
+    pw = Point(width, height)
+    p.append(pw)
+
+    return p
 
 class Game:
     """ 
@@ -522,12 +568,18 @@ class Game:
 
 #helper:
 class P:
-    decay = None
-    point = None
-    velocity = None
-    direction = None
-    color = None
-    tag = None
+    def __init__(self, **kwargs):
+        self.decay = None
+        self.point = None
+        self.velocity = None
+        self.direction = None
+        self.color = None
+        self.tag = None
+        for k,v in kwargs.items():
+            if hasattr(self, k):
+                self.k = v
+            else:
+                raise Exception(f"class P has no keyword argument {k}")
 
     def __repr__(self):
         return f"P<{self.point},{self.velocity},"\
@@ -538,9 +590,7 @@ class Particle:
     decay = 10
     velocities=[10, 13]
     colors=['white smoke', 'yellow1', 'wheat1','yellow','orange','lightgrey', 'NavajoWhite']
-    spread = 30 # random deviation in direction
     wobble=20 #random size changes
-    counter=0
 
     def __str__(self):
         return f"Particle<{self.coords}>"
@@ -550,7 +600,6 @@ class Particle:
         pi.point = Point(self.coords.x, self.coords.y)
         pi.decay = self.decay
         pi.tag=""
-        self.counter += 1
         pi.velocity = \
             random.randrange(self.velocities[0], self.velocities[1])
         pi.color = random.choice(self.colors)
@@ -560,8 +609,9 @@ class Particle:
     def set_position(self, point):
         self.coords = point
 
-    def __init__(self, coords, direction, size=10, number=10, duration=0):
+    def __init__(self, coords, direction, size=10, number=10, duration=0, spread=30):
         self.size = size
+        self.spread = spread # random deviation in direction, degrees
         self.coords = coords
         self.active = True
         self.duration = duration
@@ -642,6 +692,10 @@ class MondLander(Game):
         self.particle.spread=20
         self.particle.size=5
 
+        self.surface = drawSurface(self.canvas.width(), self.canvas.height(),
+                width(self.lander.mesh) + 20)
+        self.canvas.draw_polygon("surface", self.surface, color='grey')
+
     def userinput(self):
         super().userinput()
 
@@ -657,9 +711,10 @@ class MondLander(Game):
                 obj = translate(obj, Vector(1 * self.steering, 0, 0))
                 self.lander.fuel -= self.fuel_consumption * self.delta
             if action & Action.up:
-                self.lander.velocity += self.thrust * self.delta
-                self.lander.fuel -= self.fuel_consumption * self.delta
-                self.particle.activate(1)
+                if self.lander.fuel > 0:
+                    self.lander.velocity += self.thrust * self.delta
+                    self.lander.fuel -= self.fuel_consumption * self.delta
+                    self.particle.activate(1)
 
             self.lander.mesh = obj
 
@@ -708,6 +763,7 @@ class MondLander(Game):
                 banner(f"YOU LANDED!")
             self.done = True
 
+
 class TestParticle(Game):
     def setup(self):
         x,y   = self.canvas.width()/2, self.canvas.height()/2
@@ -720,6 +776,11 @@ class TestParticle(Game):
         self.particle.step()
         self.particle.draw(self.canvas)
 
+class TestSurface(Game):
+    def setup(self):
+        self.surface=drawSurface(self.canvas.width(), self.canvas.height(), 64)
+        self.canvas.draw_polygon("surface", self.surface, color='grey')
+
 import argparse as Ap
 import sys
 
@@ -728,6 +789,7 @@ if __name__ == "__main__":
     ap.add_argument("--test",  help="Run unit tests", action="store_true")
     ap.add_argument("--test-anim", help="Run animation tests", action="store_true")
     ap.add_argument("--test-particle", help="Run particle tests", action="store_true")
+    ap.add_argument("--test-surface", help="draw surface", action="store_true")
     args = ap.parse_args()
 
     if args.test:
@@ -736,5 +798,7 @@ if __name__ == "__main__":
         animTest()
     elif args.test_particle:
         TestParticle(400, 300).run()
+    elif args.test_surface:
+        TestSurface(640, 480).run()
     else:
         MondLander(640, 480).run()
