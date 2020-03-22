@@ -191,6 +191,7 @@ class Action(enum.IntFlag):
     up =  1 << 3
     down = 1 << 4
     quit = 1 << 5
+    restart = 1 << 6
 
 class UserInput:
     def __init__(self, widget):
@@ -220,7 +221,8 @@ class UserInput:
             set_action(Action.right)
         if (event.keysym == "Down") or event.keysym == "s":
             set_action(Action.down)
-
+        if event.keysym == "r":
+            set_action(Action.restart)
 
     def print(self, *args):
         print(*args)
@@ -472,6 +474,9 @@ def altitude(obj, canvas):
             mp.y = p.y
     return canvas.height() - mp.y
 
+def within(start,end, x):
+    return start <= x and x <= end
+
 def width(obj):
     """ x dimensions of polygon """
     x0, x1 = 0, 0
@@ -482,21 +487,23 @@ def width(obj):
             x1 = p.x
     return abs(x1 - x0)
 
-def drawSurface(width, height, landing_site_width):
+def drawSurface(width, height, ls_width):
     """
     create jagged surface as polygon with random points.
-    Make a flat landing site of landing_site width
-    return polygon of background and tuple of points for landing site
+    Make a flat landing site at (ls_x, ls_x + ls_width)
+    return polygon of background 
     """
-    assert landing_site_width <= width
+    assert ls_width <= width
     h_range = [0,30]
     p_num = 256 #jagginess, number of points
     smooth  = int(math.log(p_num))
     p = []
 
 
-    #TODO add randomly placed landing_site_width flat surface, return coords
     step = width / p_num if p_num > 0 else 0
+    ls_steps = math.ceil(ls_width/step)
+    end = p_num - ls_steps -2
+    ls_i = random.randrange(1, end)
 
     def randh():
         return height - random.randrange(h_range[0], h_range[1])
@@ -506,19 +513,29 @@ def drawSurface(width, height, landing_site_width):
 
     def skip(i):
         return True if (i % smooth != 0) else False
+    
 
     p1 = Point(0, height)
     p.append(p1)
 
-    for i in range(1,p_num-2):
-        if skip(i): continue
-        pi = Point(i*step - randw(), randh())
-        p.append(pi)
+    def make(start, end):
+        print(f"start={start} end={end} ls_steps={ls_steps}")
+        for i in range(start, end):
+            cur_x = i*step - randw()
+            if skip(i): continue
+            pi = Point(cur_x, randh())
+            p.append(pi)
+
+    print(f"ls_i={ls_i} p_num={p_num} step={step}")
+    make(1, ls_i-1)
+    p.append(Point(ls_i*step, height))
+    p.append(Point(ls_i*step+ls_width, height))
+    make(ls_i + ls_steps + 1, end)
 
     pw = Point(width, height)
     p.append(pw)
 
-    return p
+    return p, ls_i*step
 
 class Game:
     """ 
@@ -587,7 +604,6 @@ class P:
 
 class Particle:
     """ draw number particles, in direction, for duration steps """
-    decay = 10
     velocities=[10, 13]
     colors=['white smoke', 'yellow1', 'wheat1','yellow','orange','lightgrey', 'NavajoWhite']
     wobble=20 #random size changes
@@ -609,17 +625,19 @@ class Particle:
     def set_position(self, point):
         self.coords = point
 
-    def __init__(self, coords, direction, size=10, number=10, duration=0, spread=30):
+    def __init__(self, coords, direction, size=10, number=10, duration=0, spread=30, decay=10):
         self.size = size
         self.spread = spread # random deviation in direction, degrees
         self.coords = coords
-        self.active = True
-        self.duration = duration
-        self.life = 0
         self.direction = direction
+        self.duration = duration
+        self.number = number
+        self.decay = decay
+
+        self.active = True
+        self.life = 0
         self.particles = []
         self.garbage=[]
-        self.number = number
 
     def populate(self):
         for _ in range(self.number):
@@ -679,7 +697,7 @@ class MondLander(Game):
     g = 1.625 # m/s**2
     gV = Vector(0, 1 * g, 0)
     steering = 2 #vectored thrust 
-    fuel_consumption = 5
+    fuel_consumption = 10
     thrust = Vector(0, -5, 0)
     fatal_velocity = Vector(0, 1, 0)
     scale = 5
@@ -688,13 +706,29 @@ class MondLander(Game):
         self.lander = Lander(250, 0)
         self.lander.mesh = scale(self.lander.mesh, self.scale)
         self.lander.mesh = translate(self.lander.mesh, self.lander.position())
-        self.particle = Particle(Point(250,0),Vector(0,1,0))
-        self.particle.spread=20
-        self.particle.size=5
-
-        self.surface = drawSurface(self.canvas.width(), self.canvas.height(),
-                width(self.lander.mesh) + 20)
+        self.particle = Particle(Point(250,0), Vector(0,1,0), spread=20, size=5)
+        self.explosion = Particle(Point(250,0), Vector(0,1,0),
+                spread=270, size=20, number=100, decay=20)
+        self.landing_site_width =  width(self.lander.mesh) + 64
+        
+        x_site = random.randrange(0, self.canvas.width() - self.landing_site_width)
+        self.surface, self.landing_site_x = drawSurface(
+                                                self.canvas.width(),
+                                                self.canvas.height(),
+                                                self.landing_site_width)
         self.canvas.draw_polygon("surface", self.surface, color='grey')
+
+        self.exploded = False
+
+    def is_in_ls(self, obj):
+        """ is in landing site ?"""
+        x0 = self.landing_site_x
+        x1 = x0 + self.landing_site_width
+        for pi in obj:
+            if not within(x0, x1, pi.x):
+                return False
+
+        return True
 
     def userinput(self):
         super().userinput()
@@ -722,46 +756,62 @@ class MondLander(Game):
         """ simulate """
         obj = self.lander.mesh
         c = self.canvas
-        #gravitation!1
-        self.lander.velocity += self.gV * self.delta
-        obj = translate(obj, self.lander.velocity )
-        self.lander.mesh = obj
-       
-        # draw rocket exhaust
-        if self.particle.done():
-            self.particle.reset(c)
+
+        if self.exploded:
+            c.delete("Lander")
+            self.explosion.set_position(center(obj))
+            self.explosion.step()
+            self.explosion.cleanup(c)
+            self.explosion.draw(c)
+
+            if self.explosion.done():
+                self.done = True
         else:
-            #TODO should be an entity
-            # render particles as spheres
-            self.particle.set_position(center(obj))
-            self.particle.step() 
-            self.particle.cleanup(c)
-            self.particle.draw(c)
-
-        # TODO draw moon surface, landing zone
-
-        # TODO use grid for HUD
-        c.draw_text("ALT", Point(c.width()-128, 10), "orange",
-                f"ALT {altitude(obj,c):.1f}")
-        c.draw_text("FUEL", Point(c.width()-128, 40), "orange",
-                f"FUEL {self.lander.fuel:.1f}")
-        c.draw_text("m/s", Point(c.width()-128, 70), "orange",
-                f"m/s {abs(self.lander.velocity.y):.1f}")
-
-        c.draw_polygon("Lander", obj, self.lander.color)
-
-        # TODO do collision detection canvas borders
-        h = altitude(obj, c)
-        if h < 1:
-            def banner(text):
-                c.user_input.print(text)
-                c.draw_text("GAMEOVER", Point(c.width()/2-len(text)*2, c.height()/2),
-                        "orange", text)
-            if self.lander.velocity.y  > self.fatal_velocity.y:
-                banner(f"YOU CRASHED!")
+            #gravitation!1
+            self.lander.velocity += self.gV * self.delta
+            obj = translate(obj, self.lander.velocity )
+            self.lander.mesh = obj
+           
+            # draw rocket exhaust
+            if self.particle.done():
+                self.particle.reset(c)
             else:
-                banner(f"YOU LANDED!")
-            self.done = True
+                #TODO should be an entity
+                # render particles as spheres
+                self.particle.set_position(center(obj))
+                self.particle.step() 
+                self.particle.cleanup(c)
+                self.particle.draw(c)
+
+            # TODO draw moon surface, landing zone
+
+            # TODO use grid for HUD
+            c.draw_text("ALT", Point(c.width()-128, 10), "orange",
+                    f"ALT {altitude(obj,c):.1f}")
+            c.draw_text("FUEL", Point(c.width()-128, 40), "orange",
+                    f"FUEL {self.lander.fuel:.1f}")
+            c.draw_text("m/s", Point(c.width()-128, 70), "orange",
+                    f"m/s {abs(self.lander.velocity.y):.1f}")
+
+            c.draw_polygon("Lander", obj, self.lander.color)
+
+            # TODO do collision detection canvas borders
+            h = altitude(obj, c)
+            if h < 1:
+                def banner(text):
+                    c.user_input.print(text)
+                    c.draw_text("GAMEOVER\n(R)retry", Point(c.width()/2-len(text)*2, c.height()/2),
+                            "orange", text)
+
+                tooFast = self.lander.velocity.y  > self.fatal_velocity.y
+                if tooFast or not self.is_in_ls(obj):
+                    banner(f"YOU CRASHED!")
+                    self.exploded = True
+                    where = center(obj)
+                    self.explosion.activate(2 * self.refreshrate)
+                else:
+                    banner(f"YOU LANDED!")
+                    self.done = True
 
 
 class TestParticle(Game):
@@ -778,7 +828,7 @@ class TestParticle(Game):
 
 class TestSurface(Game):
     def setup(self):
-        self.surface=drawSurface(self.canvas.width(), self.canvas.height(), 64)
+        self.surface, self.ls_x =drawSurface(self.canvas.width(), self.canvas.height(), 128)
         self.canvas.draw_polygon("surface", self.surface, color='grey')
 
 import argparse as Ap
